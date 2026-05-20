@@ -1,0 +1,224 @@
+{% extends "base/authenticated.html" %}
+
+{% block title %}Ocorrência #{{ ocorrencia.id }} — Gestão SAC{% endblock %}
+
+{% block page_content %}
+<div class="mx-auto max-w-4xl space-y-6">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <a href="/ocorrencias" class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+                <i data-lucide="arrow-left" class="h-4 w-4"></i>
+                Voltar
+            </a>
+            <span class="text-gray-300">/</span>
+            <h2 class="text-xl font-bold text-gray-900">Ocorrência #{{ ocorrencia.numero_nota_fiscal }}</h2>
+        </div>
+        <div class="flex items-center gap-3">
+            <!-- Badge de Status -->
+            {% if ocorrencia.status == 'NOVO' %}
+            <span class="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-3 py-1 text-sm font-semibold text-blue-700">
+                <span class="h-1.5 w-1.5 rounded-full bg-blue-500"></span>Novo
+            </span>
+            {% elif ocorrencia.status == 'ENCAMINHADO' %}
+            <span class="inline-flex items-center gap-1.5 rounded-full bg-yellow-100 px-3 py-1 text-sm font-semibold text-yellow-700">
+                <span class="h-1.5 w-1.5 rounded-full bg-yellow-500"></span>Encaminhado
+            </span>
+            {% else %}
+            <span class="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-sm font-semibold text-green-700">
+                <span class="h-1.5 w-1.5 rounded-full bg-green-500"></span>Finalizado
+            </span>
+            {% endif %}
+
+            {% if ocorrencia.status != 'FINALIZADO' and (current_user.papel == 'GERENTE' or ocorrencia.criado_por_id == current_user.id) %}
+            <a href="/ocorrencias/{{ ocorrencia.id }}/editar"
+               class="inline-flex items-center gap-2 rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-700">
+                <i data-lucide="pencil" class="h-4 w-4"></i>
+                Editar
+            </a>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Mensagens -->
+    {% if sucesso %}
+    <div class="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+        <i data-lucide="check-circle" class="h-4 w-4 flex-shrink-0"></i>
+        <span>{{ sucesso }}</span>
+    </div>
+    {% endif %}
+    {% if erro %}
+    <div class="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <i data-lucide="alert-circle" class="h-4 w-4 flex-shrink-0"></i>
+        <span>{{ erro }}</span>
+    </div>
+    {% endif %}
+
+    <!-- Card: Dados da Nota Fiscal -->
+    <div class="rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div class="flex items-center gap-2 border-b border-gray-100 px-6 py-4">
+            <i data-lucide="file-text" class="h-4 w-4 text-blue-500"></i>
+            <h3 class="text-base font-semibold text-gray-900">Dados da Nota Fiscal</h3>
+        </div>
+        <div class="grid grid-cols-2 gap-x-6 gap-y-4 p-6 sm:grid-cols-3">
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-gray-400">Nota Fiscal</p>
+                <p class="mt-1 text-sm font-semibold text-gray-900">#{{ ocorrencia.numero_nota_fiscal }}</p>
+            </div>
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-gray-400">Data Faturamento</p>
+                <p class="mt-1 text-sm text-gray-700">
+                    {{ ocorrencia.data_faturamento.strftime('%d/%m/%Y') if ocorrencia.data_faturamento else '—' }}
+                </p>
+            </div>
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-gray-400">Valor Total</p>
+                <p class="mt-1 text-sm font-semibold text-gray-900">
+                    {% if ocorrencia.valor_total %}
+                    R$ {{ "%.2f"|format(ocorrencia.valor_total) | replace('.', ',') }}
+                    {% else %}—{% endif %}
+                </p>
+            </div>
+            <div class="col-span-2 sm:col-span-1">
+                <p class="text-xs font-semibold uppercase tracking-wider text-gray-400">Cliente</p>
+                <p class="mt-1 text-sm text-gray-700">{{ ocorrencia.cliente or '—' }}</p>
+            </div>
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-gray-400">Vendedor</p>
+                <p class="mt-1 text-sm text-gray-700">{{ ocorrencia.vendedor or '—' }}</p>
+            </div>
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-gray-400">Motorista</p>
+                <p class="mt-1 text-sm text-gray-700">{{ ocorrencia.motorista or '—' }}</p>
+            </div>
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-gray-400">ID Carregamento</p>
+                <p class="mt-1 text-sm text-gray-700">{{ ocorrencia.id_carregamento or '—' }}</p>
+            </div>
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-gray-400">Saída do Carregamento</p>
+                <p class="mt-1 text-sm text-gray-700">
+                    {{ ocorrencia.data_saida_carregamento.strftime('%d/%m/%Y') if ocorrencia.data_saida_carregamento else '—' }}
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Dados da Ocorrência -->
+    <div class="rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div class="flex items-center gap-2 border-b border-gray-100 px-6 py-4">
+            <i data-lucide="file-warning" class="h-4 w-4 text-orange-500"></i>
+            <h3 class="text-base font-semibold text-gray-900">Dados da Ocorrência</h3>
+        </div>
+        <div class="p-6 space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wider text-gray-400">Situação</p>
+                    <p class="mt-1 text-sm font-medium text-gray-800">{{ situacao_labels.get(ocorrencia.situacao, ocorrencia.situacao) }}</p>
+                </div>
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wider text-gray-400">Criado por</p>
+                    <p class="mt-1 text-sm text-gray-700">{{ ocorrencia.criado_por_nome or '—' }}</p>
+                </div>
+            </div>
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Motivo</p>
+                <p class="text-sm text-gray-700 whitespace-pre-wrap rounded-lg bg-gray-50 p-3 border border-gray-100">{{ ocorrencia.motivo or '—' }}</p>
+            </div>
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Observações</p>
+                <p class="text-sm text-gray-700 whitespace-pre-wrap rounded-lg bg-gray-50 p-3 border border-gray-100">{{ ocorrencia.observacoes or '—' }}</p>
+            </div>
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Encaminhamento</p>
+                <p class="text-sm text-gray-700 whitespace-pre-wrap rounded-lg bg-gray-50 p-3 border border-gray-100">{{ ocorrencia.encaminhamento or '—' }}</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card: Anexos -->
+    <div class="rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div class="flex items-center gap-2 border-b border-gray-100 px-6 py-4">
+            <i data-lucide="paperclip" class="h-4 w-4 text-purple-500"></i>
+            <h3 class="text-base font-semibold text-gray-900">Anexos</h3>
+            <span class="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">
+                {{ ocorrencia.anexos | length }}
+            </span>
+        </div>
+
+        <div class="p-6 space-y-4">
+            <!-- Lista de Anexos -->
+            {% if ocorrencia.anexos %}
+            <div class="space-y-2">
+                {% for anexo in ocorrencia.anexos %}
+                <div class="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <i data-lucide="file" class="h-5 w-5 flex-shrink-0 text-gray-400"></i>
+                        <div class="min-w-0">
+                            <p class="truncate text-sm font-medium text-gray-700">{{ anexo.nome_arquivo }}</p>
+                            <p class="text-xs text-gray-400">
+                                {% if anexo.tamanho %}
+                                    {% if anexo.tamanho > 1048576 %}
+                                        {{ "%.1f"|format(anexo.tamanho / 1048576) }} MB
+                                    {% elif anexo.tamanho > 1024 %}
+                                        {{ "%.1f"|format(anexo.tamanho / 1024) }} KB
+                                    {% else %}
+                                        {{ anexo.tamanho }} bytes
+                                    {% endif %}
+                                {% else %}—{% endif %}
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0 ml-4">
+                        <a href="/api/v1/ocorrencias/{{ ocorrencia.id }}/anexos/{{ anexo.id }}/download"
+                           target="_blank"
+                           class="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700">
+                            <i data-lucide="download" class="h-3 w-3"></i>
+                            Baixar
+                        </a>
+                        {% if current_user.papel == 'GERENTE' or ocorrencia.criado_por_id == current_user.id %}
+                        <form action="/ocorrencias/{{ ocorrencia.id }}/anexos/{{ anexo.id }}/deletar" method="post"
+                              onsubmit="return confirm('Remover este anexo?')">
+                            <button type="submit"
+                                    class="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50">
+                                <i data-lucide="trash-2" class="h-3 w-3"></i>
+                                Remover
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-sm text-gray-400 text-center py-4">Nenhum anexo adicionado.</p>
+            {% endif %}
+
+            <!-- Upload de novo anexo -->
+            {% if ocorrencia.status != 'FINALIZADO' and (current_user.papel == 'GERENTE' or ocorrencia.criado_por_id == current_user.id) %}
+            <div class="border-t border-gray-100 pt-4">
+                <p class="text-sm font-medium text-gray-700 mb-3">Adicionar Anexo</p>
+                <form action="/ocorrencias/{{ ocorrencia.id }}/anexos"
+                      method="post"
+                      enctype="multipart/form-data"
+                      class="flex items-center gap-3">
+                    <input
+                        type="file"
+                        name="file"
+                        required
+                        class="flex-1 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white hover:file:bg-blue-700"
+                    />
+                    <button type="submit"
+                            class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 flex-shrink-0">
+                        <i data-lucide="upload" class="h-4 w-4"></i>
+                        Enviar
+                    </button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+</div>
+{% endblock %}

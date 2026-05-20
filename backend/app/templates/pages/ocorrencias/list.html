@@ -1,0 +1,144 @@
+{% extends "base/authenticated.html" %}
+
+{% block title %}Ocorrências — Gestão SAC{% endblock %}
+
+{% block page_content %}
+<div class="space-y-5">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h2 class="text-xl font-bold text-gray-900">Ocorrências</h2>
+            <p class="text-sm text-gray-500">Gerencie todas as ocorrências do sistema</p>
+        </div>
+        <a href="/ocorrencias/nova"
+           class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+            <i data-lucide="plus" class="h-4 w-4"></i>
+            Nova Ocorrência
+        </a>
+    </div>
+
+    <!-- Filtros -->
+    <div class="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        <form action="/ocorrencias" method="get" class="flex flex-wrap items-end gap-4">
+            <div class="flex-1 min-w-[180px]">
+                <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Status</label>
+                <select name="status"
+                        class="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
+                    <option value="">Todos</option>
+                    <option value="NOVO" {% if status_filter == 'NOVO' %}selected{% endif %}>Novo</option>
+                    <option value="ENCAMINHADO" {% if status_filter == 'ENCAMINHADO' %}selected{% endif %}>Encaminhado</option>
+                    <option value="FINALIZADO" {% if status_filter == 'FINALIZADO' %}selected{% endif %}>Finalizado</option>
+                </select>
+            </div>
+
+            <div class="flex-1 min-w-[180px]">
+                <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Situação</label>
+                <select name="situacao"
+                        class="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
+                    <option value="">Todas</option>
+                    {% for s in situacoes %}
+                    <option value="{{ s.value }}" {% if situacao_filter == s.value %}selected{% endif %}>
+                        {{ situacao_labels.get(s.value, s.value) }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="flex-1 min-w-[180px]">
+                <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Nota Fiscal</label>
+                <input
+                    type="text"
+                    name="numero_nota_fiscal"
+                    value="{{ nota_filter }}"
+                    placeholder="Nº da nota..."
+                    class="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+            </div>
+
+            <div class="flex gap-2">
+                <button type="submit"
+                        class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">
+                    <i data-lucide="search" class="h-4 w-4"></i>
+                    Filtrar
+                </button>
+                <a href="/ocorrencias"
+                   class="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-50">
+                    <i data-lucide="x" class="h-4 w-4"></i>
+                    Limpar
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <!-- Tabela -->
+    <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+        {% if ocorrencias %}
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-100">
+                <thead>
+                    <tr class="bg-gray-50">
+                        <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Nota Fiscal</th>
+                        <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Cliente</th>
+                        <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Situação</th>
+                        <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Status</th>
+                        <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Criado em</th>
+                        <th class="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Criado por</th>
+                        <th class="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">Ações</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-50">
+                    {% for oc in ocorrencias %}
+                    <tr class="transition hover:bg-gray-50">
+                        <td class="whitespace-nowrap px-6 py-4 text-sm font-semibold text-gray-900">#{{ oc.numero_nota_fiscal }}</td>
+                        <td class="px-6 py-4 text-sm text-gray-600 max-w-[200px] truncate">{{ oc.cliente or '—' }}</td>
+                        <td class="px-6 py-4 text-sm text-gray-600">{{ situacao_labels.get(oc.situacao, oc.situacao) }}</td>
+                        <td class="px-6 py-4">
+                            {% if oc.status == 'NOVO' %}
+                            <span class="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">Novo</span>
+                            {% elif oc.status == 'ENCAMINHADO' %}
+                            <span class="inline-flex items-center rounded-full bg-yellow-100 px-2.5 py-0.5 text-xs font-semibold text-yellow-700">Encaminhado</span>
+                            {% else %}
+                            <span class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700">Finalizado</span>
+                            {% endif %}
+                        </td>
+                        <td class="whitespace-nowrap px-6 py-4 text-sm text-gray-500">
+                            {{ oc.created_at.strftime('%d/%m/%Y %H:%M') if oc.created_at else '—' }}
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-500">{{ oc.criado_por_nome or '—' }}</td>
+                        <td class="px-6 py-4 text-right">
+                            <div class="flex items-center justify-end gap-2">
+                                <a href="/ocorrencias/{{ oc.id }}"
+                                   class="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700">
+                                    <i data-lucide="eye" class="h-3 w-3"></i>
+                                    Ver
+                                </a>
+                                {% if oc.status != 'FINALIZADO' %}
+                                <a href="/ocorrencias/{{ oc.id }}/editar"
+                                   class="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-yellow-50 hover:border-yellow-200 hover:text-yellow-700">
+                                    <i data-lucide="pencil" class="h-3 w-3"></i>
+                                    Editar
+                                </a>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="border-t border-gray-100 px-6 py-3 text-xs text-gray-400">
+            {{ ocorrencias | length }} ocorrência(s) encontrada(s)
+        </div>
+        {% else %}
+        <div class="flex flex-col items-center justify-center py-16 text-center">
+            <i data-lucide="inbox" class="h-12 w-12 text-gray-200 mb-4"></i>
+            <p class="text-sm font-medium text-gray-400">Nenhuma ocorrência encontrada</p>
+            <p class="text-xs text-gray-300 mt-1">Tente ajustar os filtros ou crie uma nova ocorrência</p>
+            <a href="/ocorrencias/nova" class="mt-4 text-sm font-medium text-blue-600 hover:underline">Nova Ocorrência →</a>
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,148 @@
+{% extends "base/authenticated.html" %}
+
+{% block title %}Nova Ocorrência — Gestão SAC{% endblock %}
+
+{% block page_content %}
+<div class="mx-auto max-w-3xl space-y-6">
+
+    <!-- Header -->
+    <div class="flex items-center gap-3">
+        <a href="/ocorrencias" class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700">
+            <i data-lucide="arrow-left" class="h-4 w-4"></i>
+            Voltar
+        </a>
+        <span class="text-gray-300">/</span>
+        <h2 class="text-xl font-bold text-gray-900">Nova Ocorrência</h2>
+    </div>
+
+    {% if erro %}
+    <div class="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <i data-lucide="alert-circle" class="h-4 w-4 flex-shrink-0"></i>
+        <span>{{ erro }}</span>
+    </div>
+    {% endif %}
+
+    <form action="/ocorrencias" method="post" x-data="{ nota_encontrada: false, numero_nota: '' }" class="space-y-6">
+
+        <!-- Seção 1: Nota Fiscal -->
+        <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+            <h3 class="mb-4 flex items-center gap-2 text-base font-semibold text-gray-900">
+                <span class="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">1</span>
+                Nota Fiscal
+            </h3>
+
+            <div class="flex items-end gap-3">
+                <div class="flex-1">
+                    <label for="numero_nota_busca" class="block text-sm font-medium text-gray-700 mb-1.5">
+                        Número da Nota Fiscal
+                    </label>
+                    <input
+                        id="numero_nota_busca"
+                        type="number"
+                        name="numero_nota_fiscal"
+                        placeholder="Ex: 123456"
+                        x-model="numero_nota"
+                        class="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    />
+                </div>
+                <button
+                    type="button"
+                    hx-get="/ocorrencias/buscar-nota"
+                    hx-target="#nota-info"
+                    hx-include="[name=numero_nota_fiscal]"
+                    hx-indicator="#buscar-spinner"
+                    class="inline-flex items-center gap-2 rounded-lg bg-gray-800 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-700 flex-shrink-0">
+                    <span id="buscar-spinner" class="htmx-indicator">
+                        <svg class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                    </span>
+                    <i data-lucide="search" class="h-4 w-4"></i>
+                    Buscar
+                </button>
+            </div>
+
+            <!-- Resultado HTMX -->
+            <div id="nota-info" class="mt-4"></div>
+        </div>
+
+        <!-- Seção 2: Dados da Ocorrência -->
+        <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+            <h3 class="mb-4 flex items-center gap-2 text-base font-semibold text-gray-900">
+                <span class="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">2</span>
+                Dados da Ocorrência
+            </h3>
+
+            <div class="space-y-4">
+
+                <div>
+                    <label for="situacao" class="block text-sm font-medium text-gray-700 mb-1.5">
+                        Situação <span class="text-red-500">*</span>
+                    </label>
+                    <select
+                        id="situacao"
+                        name="situacao"
+                        required
+                        class="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2.5 text-sm text-gray-700 transition focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
+                        <option value="">Selecione a situação...</option>
+                        {% for s in situacoes %}
+                        <option value="{{ s.value }}">{{ situacao_labels.get(s.value, s.value) }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div>
+                    <label for="motivo" class="block text-sm font-medium text-gray-700 mb-1.5">Motivo</label>
+                    <textarea
+                        id="motivo"
+                        name="motivo"
+                        rows="3"
+                        placeholder="Descreva o motivo da ocorrência..."
+                        class="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"></textarea>
+                </div>
+
+                <div>
+                    <label for="observacoes" class="block text-sm font-medium text-gray-700 mb-1.5">Observações</label>
+                    <textarea
+                        id="observacoes"
+                        name="observacoes"
+                        rows="3"
+                        placeholder="Observações adicionais..."
+                        class="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"></textarea>
+                </div>
+
+                <div>
+                    <label for="encaminhamento" class="block text-sm font-medium text-gray-700 mb-1.5">Encaminhamento</label>
+                    <textarea
+                        id="encaminhamento"
+                        name="encaminhamento"
+                        rows="3"
+                        placeholder="Como será encaminhada esta ocorrência..."
+                        class="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Botões -->
+        <div class="flex items-center justify-end gap-3">
+            <a href="/ocorrencias"
+               class="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-600 transition hover:bg-gray-50">
+                Cancelar
+            </a>
+            <button
+                type="submit"
+                class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                <i data-lucide="save" class="h-4 w-4"></i>
+                Salvar Ocorrência
+            </button>
+        </div>
+    </form>
+</div>
+
+<style>
+    .htmx-indicator { display: none; }
+    .htmx-request .htmx-indicator { display: inline-flex; }
+    .htmx-request.htmx-indicator { display: inline-flex; }
+</style>
+{% endblock %}
