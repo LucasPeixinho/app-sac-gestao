@@ -10,10 +10,6 @@ class RequiresLogin(Exception):
     pass
 
 
-class RequiresGerente(Exception):
-    pass
-
-
 async def get_current_web_user(request: Request, db: Session = Depends(get_write_db)) -> Usuario:
     token = request.cookies.get("gsac_session")
     if not token:
@@ -27,8 +23,3 @@ async def get_current_web_user(request: Request, db: Session = Depends(get_write
     return user
 
 
-async def require_gerente(current_user: Usuario = Depends(get_current_web_user)) -> Usuario:
-    from app.utils.enums import RoleEnum
-    if current_user.papel != RoleEnum.GERENTE:
-        raise RequiresGerente()
-    return current_user

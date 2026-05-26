@@ -1,8 +1,7 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.core.database import get_write_db
@@ -11,9 +10,9 @@ from app.schemas.usuario import UsuarioCreate, UsuarioUpdate
 from app.services.user_service import user_service
 from app.utils.enums import RoleEnum
 from app.web.dependencies import get_current_web_user
+from app.web.templates_config import templates
 
 router = APIRouter(prefix="/usuarios", tags=["web-usuarios"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 def _check_gerente(current_user: Usuario):
@@ -81,7 +80,8 @@ async def create_usuario(
         user_service.create_user(db, UsuarioCreate(nome=nome, email=email, senha=senha, papel=RoleEnum(papel)))
         return RedirectResponse(url="/usuarios?sucesso=Usuário+criado+com+sucesso", status_code=302)
     except Exception as e:
-        return RedirectResponse(url=f"/usuarios/novo?erro={str(e)}", status_code=302)
+        erro = e.detail if isinstance(e, HTTPException) else "Erro interno. Tente novamente."
+        return RedirectResponse(url=f"/usuarios/novo?erro={erro}", status_code=302)
 
 
 @router.get("/{usuario_id}/editar", response_class=HTMLResponse, include_in_schema=False)
@@ -140,4 +140,5 @@ async def update_usuario(
         user_service.update_user(db, usuario_id, data)
         return RedirectResponse(url="/usuarios?sucesso=Usuário+atualizado+com+sucesso", status_code=302)
     except Exception as e:
-        return RedirectResponse(url=f"/usuarios/{usuario_id}/editar?erro={str(e)}", status_code=302)
+        erro = e.detail if isinstance(e, HTTPException) else "Erro interno. Tente novamente."
+        return RedirectResponse(url=f"/usuarios/{usuario_id}/editar?erro={erro}", status_code=302)

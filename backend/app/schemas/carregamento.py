@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 class ProdutoSchema(BaseModel):
     codprod: int
+    descricao: str
     qt: float
     pvenda: float
 
@@ -14,11 +15,13 @@ class NotaFiscalResponse(BaseModel):
     numero_nota: int
     data_faturamento: Optional[date]
     cliente: Optional[str]
+    cgcent: Optional[str]
     valor_total: Optional[float]
     vendedor: Optional[str]
     id_carregamento: Optional[int]
     data_saida_carregamento: Optional[date]
     motorista: Optional[str]
+    transportadora: Optional[str]
     produtos: List[ProdutoSchema]
 
 

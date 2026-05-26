@@ -9,6 +9,22 @@ from app.models.anexo import Anexo
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
 
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+ALLOWED_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/plain",
+    "text/csv",
+}
+
 
 def _ocorrencia_dir(ocorrencia_id: int) -> Path:
     path = UPLOAD_DIR / "ocorrencias" / str(ocorrencia_id)
@@ -20,11 +36,24 @@ class AnexoService:
 
     @staticmethod
     async def save(db: Session, ocorrencia_id: int, file: UploadFile, current_user) -> Anexo:
+        if file.content_type not in ALLOWED_MIME_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Tipo de arquivo não permitido: {file.content_type}.",
+            )
+
         ext = Path(file.filename).suffix
         nome_unico = f"{uuid.uuid4().hex}{ext}"
         destino = _ocorrencia_dir(ocorrencia_id) / nome_unico
 
         contents = await file.read()
+
+        if len(contents) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Arquivo excede o limite de {MAX_FILE_SIZE // (1024 * 1024)} MB.",
+            )
+
         with open(destino, "wb") as f:
             f.write(contents)
 

@@ -1,29 +1,63 @@
-from typing import Optional
+import logging
+from typing import Optional, List
 
-from fastapi import APIRouter, Depends, Form, Request, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, File
+
+logger = logging.getLogger(__name__)
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.core.database import get_write_db, read_engine
+from app.models.ocorrencia import Ocorrencia
 from app.models.usuario import Usuario
-from app.schemas.ocorrencia import OcorrenciaCreate, OcorrenciaUpdate
+from app.schemas.ocorrencia import (
+    AdicionarComentarioRequest,
+    AprovarRequest,
+    ConcluirRequest,
+    EncaminharRequest,
+    MarcarPendenteRequest,
+    OcorrenciaCreate,
+    OcorrenciaItemCreate,
+    OcorrenciaUpdate,
+    ReprovarRequest,
+)
+from app.utils.enums import ItemRoleEnum
 from app.services.anexo_service import anexo_service
 from app.services.carregamento_service import carregamento_service
 from app.services.ocorrencia_service import ocorrencia_service
-from app.utils.enums import RoleEnum, SituacaoOcorrenciaEnum, StatusOcorrenciaEnum
+from app.utils.enums import (
+    CausaRaizEnum,
+    MotivoEnum,
+    MOTIVO_LABELS,
+    ResponsavelTipoEnum,
+    SetorDestinoEnum,
+    StatusOcorrenciaEnum,
+    TipoOcorrenciaEnum,
+    TIPO_LABELS,
+    CAUSA_LABELS,
+    RESPONSAVEL_LABELS,
+    SETOR_LABELS,
+    STATUS_LABELS,
+)
 from app.web.dependencies import get_current_web_user
+from app.web.templates_config import templates
 
 router = APIRouter(prefix="/ocorrencias", tags=["web-ocorrencias"])
-templates = Jinja2Templates(directory="app/templates")
 
-SITUACAO_LABELS = {
-    "DEVOLUCAO_TOTAL": "Devolução Total",
-    "DEVOLUCAO_PARCIAL": "Devolução Parcial",
-    "INVERSAO_MERCADORIA": "Inversão de Mercadoria",
-    "SOBRA": "Sobra",
-    "AVARIA": "Avaria",
-    "COLETA": "Coleta",
+# Contexto de enums compartilhado por todos os templates de ocorrência
+_ENUM_CONTEXT = {
+    "tipos": TipoOcorrenciaEnum,       # DEVOLUCAO_TOTAL, REENVIO, etc.
+    "motivos": MotivoEnum,              # AVARIA, FALTA_MERCADORIA, etc.
+    "causas": CausaRaizEnum,
+    "responsaveis": ResponsavelTipoEnum,
+    "setores": SetorDestinoEnum,
+    "status_enum": StatusOcorrenciaEnum,
+    "tipo_labels": TIPO_LABELS,
+    "motivo_labels": MOTIVO_LABELS,
+    "causa_labels": CAUSA_LABELS,
+    "responsavel_labels": RESPONSAVEL_LABELS,
+    "setor_labels": SETOR_LABELS,
+    "status_labels": STATUS_LABELS,
 }
 
 
@@ -33,15 +67,60 @@ async def list_ocorrencias(
     current_user: Usuario = Depends(get_current_web_user),
     db: Session = Depends(get_write_db),
     status: Optional[str] = None,
-    situacao: Optional[str] = None,
+    tipo_ocorrencia: Optional[str] = None,
+    motivo: Optional[str] = None,
+    causa_raiz: Optional[str] = None,
+    responsavel_tipo: Optional[str] = None,
+    setor_destino: Optional[str] = None,
     numero_nota_fiscal: Optional[str] = None,
+    data_inicio: Optional[str] = None,
+    data_fim: Optional[str] = None,
+    # "0" = todos; ausente = current_user; outro int = filtrar pelo ID
+    atribuido_a_id: Optional[str] = None,
 ):
+    from datetime import date
+    from app.services.user_service import user_service
+
+    di = date.fromisoformat(data_inicio) if data_inicio else None
+    df = date.fromisoformat(data_fim) if data_fim else None
+
+    # Lógica de filtro por atribuição:
+    # - parâmetro ausente na URL  → filtra pelo usuário logado (default)
+    # - atribuido_a_id=0          → sem filtro (todos)
+    # - atribuido_a_id=N          → filtra pelo usuário N
+    query_keys = set(request.query_params.keys())
+    if "atribuido_a_id" not in query_keys:
+        if current_user.papel == "GERENTE":
+            atribuido_filter_id: Optional[int] = None
+            atribuido_filter_str = "0"
+        else:
+            atribuido_filter_id = current_user.id
+            atribuido_filter_str = str(current_user.id)
+    elif atribuido_a_id in (None, "", "0"):
+        atribuido_filter_id = None
+        atribuido_filter_str = "0"
+    else:
+        atribuido_filter_id = int(atribuido_a_id)
+        atribuido_filter_str = atribuido_a_id
+
     ocorrencias = ocorrencia_service.list(
         db, current_user,
         status_filter=status or None,
-        situacao=situacao or None,
+        tipo_ocorrencia=tipo_ocorrencia or None,
+        motivo=motivo or None,
+        causa_raiz=causa_raiz or None,
+        responsavel_tipo=responsavel_tipo or None,
+        setor_destino=setor_destino or None,
         numero_nota_fiscal=numero_nota_fiscal or None,
+        atribuido_a_id=atribuido_filter_id,
+        data_inicio=di,
+        data_fim=df,
     )
+
+    # KPI independente do filtro: conta CONCLUIDO no banco sem aplicar filtros de tela
+    aguardando_aprovacao = db.query(Ocorrencia).filter(Ocorrencia.status == "CONCLUIDO").count()
+    usuarios = user_service.get_all_users(db)
+
     return templates.TemplateResponse(
         request,
         "pages/ocorrencias/list.html",
@@ -49,12 +128,20 @@ async def list_ocorrencias(
             "current_user": current_user,
             "page_title": "Ocorrências",
             "ocorrencias": ocorrencias,
+            "aguardando_aprovacao": aguardando_aprovacao,
+            "usuarios": usuarios,
+            # filtros ativos
             "status_filter": status or "",
-            "situacao_filter": situacao or "",
+            "tipo_filter": tipo_ocorrencia or "",
+            "motivo_filter": motivo or "",
+            "causa_filter": causa_raiz or "",
+            "responsavel_filter": responsavel_tipo or "",
+            "setor_filter": setor_destino or "",
             "nota_filter": numero_nota_fiscal or "",
-            "situacoes": SituacaoOcorrenciaEnum,
-            "status_enum": StatusOcorrenciaEnum,
-            "situacao_labels": SITUACAO_LABELS,
+            "data_inicio_filter": data_inicio or "",
+            "data_fim_filter": data_fim or "",
+            "atribuido_filter": atribuido_filter_str,
+            **_ENUM_CONTEXT,
         },
     )
 
@@ -63,16 +150,19 @@ async def list_ocorrencias(
 async def create_ocorrencia_page(
     request: Request,
     current_user: Usuario = Depends(get_current_web_user),
+    db: Session = Depends(get_write_db),
 ):
+    from app.services.user_service import user_service
+    usuarios = user_service.get_all_users(db)
     return templates.TemplateResponse(
         request,
         "pages/ocorrencias/create.html",
         {
             "current_user": current_user,
             "page_title": "Nova Ocorrência",
-            "situacoes": SituacaoOcorrenciaEnum,
-            "situacao_labels": SITUACAO_LABELS,
+            "usuarios": usuarios,
             "erro": request.query_params.get("erro", ""),
+            **_ENUM_CONTEXT,
         },
     )
 
@@ -99,7 +189,12 @@ async def buscar_nota(
     else:
         erro = "Informe o número da nota fiscal."
 
-    return templates.TemplateResponse(request, "partials/nota_info.html", {"nota": nota, "erro": erro})
+    return templates.TemplateResponse(
+        request,
+        "partials/nota_info.html",
+        {"nota": nota, "erro": erro},
+    )
+
 
 
 @router.post("", include_in_schema=False)
@@ -107,25 +202,107 @@ async def create_ocorrencia(
     request: Request,
     current_user: Usuario = Depends(get_current_web_user),
     db: Session = Depends(get_write_db),
-    numero_nota_fiscal: str = Form(...),
-    situacao: str = Form(...),
+    numero_nota_fiscal: Optional[str] = Form(None),
+    tipo_ocorrencia: Optional[str] = Form(None),
     motivo: Optional[str] = Form(None),
-    observacoes: Optional[str] = Form(None),
-    encaminhamento: Optional[str] = Form(None),
+    causa_raiz: Optional[str] = Form(None),
+    responsavel_tipo: Optional[str] = Form(None),
+    descricao: Optional[str] = Form(None),
+    motivo_outro: Optional[str] = Form(None),
+    causa_outro: Optional[str] = Form(None),
+    atribuido_a_id: Optional[int] = Form(None),
+    itens_json: str = Form("[]"),
+    acao: Optional[str] = Form(None),
+    arquivos: Optional[List[UploadFile]] = File(None),
 ):
+    import json as _json
+
+    if not numero_nota_fiscal:
+        return RedirectResponse(url="/ocorrencias/nova?erro=Informe+a+nota+fiscal", status_code=302)
+
+    # "Enviar para aprovação" requires all classification fields
+    if acao == "concluir":
+        faltando = []
+        if not tipo_ocorrencia:
+            faltando.append("Tipo de Ocorrência")
+        if not motivo:
+            faltando.append("Motivo")
+        if not causa_raiz:
+            faltando.append("Causa")
+        if not responsavel_tipo:
+            faltando.append("Responsável")
+        if faltando:
+            campos = ", ".join(faltando)
+            return RedirectResponse(
+                url=f"/ocorrencias/nova?erro=Preencha+os+campos+obrigatórios:+{campos}",
+                status_code=302,
+            )
+
     try:
+        # Build detalhes_especificos from "Outros" free-text fields
+        detalhes: dict = {}
+        if tipo_ocorrencia == "OUTRO" and motivo_outro:
+            detalhes["motivo_outro"] = motivo_outro
+        if causa_raiz == "OUTRO" and causa_outro:
+            detalhes["causa_outro"] = causa_outro
+
+        itens = []
+        if itens_json:
+            try:
+                for raw in _json.loads(itens_json):
+                    itens.append(OcorrenciaItemCreate(
+                        codprod=str(raw.get("codprod", "")),
+                        descricao_produto=raw.get("descricao_produto"),
+                        qtd_afetada=raw.get("qtd_afetada"),
+                        valor_unitario=raw.get("valor_unitario"),
+                        valor_total=raw.get("valor_total"),
+                        item_role=ItemRoleEnum(raw.get("item_role", "AFETADO")),
+                    ))
+            except Exception as exc:
+                print(f"[DEBUG] ERRO ao parsear itens_json: {exc}", flush=True)
+
         data = OcorrenciaCreate(
             numero_nota_fiscal=int(numero_nota_fiscal),
-            situacao=SituacaoOcorrenciaEnum(situacao),
-            motivo=motivo or None,
-            observacoes=observacoes or None,
-            encaminhamento=encaminhamento or None,
+            tipo_ocorrencia=TipoOcorrenciaEnum(tipo_ocorrencia) if tipo_ocorrencia else None,
+            motivo=MotivoEnum(motivo) if motivo else None,
+            causa_raiz=CausaRaizEnum(causa_raiz) if causa_raiz else None,
+            responsavel_tipo=ResponsavelTipoEnum(responsavel_tipo) if responsavel_tipo else None,
+            descricao=descricao or None,
+            detalhes_especificos=detalhes or None,
+            atribuido_a_id=atribuido_a_id or None,
+            itens=itens,
         )
         result = ocorrencia_service.create(db, data, current_user)
+
+        # Salva arquivos anexados no momento da criação
+        if arquivos:
+            from app.services.evento_service import evento_service as _ev
+            for file in arquivos:
+                if file and file.filename:
+                    await anexo_service.save(db, result["id"], file, current_user)
+                    _ev.registrar_evento(
+                        db, result["id"], "ANEXO_ADICIONADO", None, None, file.filename, current_user.id
+                    )
+            db.commit()  # persiste eventos de anexo que ficaram pendentes após o loop
+
+        if acao == "concluir":
+            ocorrencia_service.concluir(
+                db, result["id"], ConcluirRequest(comentario=None), current_user
+            )
+            return RedirectResponse(
+                url=f"/ocorrencias/{result['id']}?sucesso=Ocorrência+enviada+para+aprovação",
+                status_code=302,
+            )
+
         return RedirectResponse(url=f"/ocorrencias/{result['id']}", status_code=302)
     except Exception as e:
-        msg = str(e)
-        erro = "Nota fiscal não encontrada no CEDEP." if "não encontrada" in msg.lower() else f"Erro: {msg}"
+        if isinstance(e, HTTPException) and "não encontrada" in (e.detail or "").lower():
+            erro = "Nota fiscal não encontrada no CEDEP."
+        elif isinstance(e, HTTPException):
+            erro = e.detail
+        else:
+            logger.exception("Erro ao criar ocorrência")
+            erro = "Erro interno. Tente novamente."
         return RedirectResponse(url=f"/ocorrencias/nova?erro={erro}", status_code=302)
 
 
@@ -148,9 +325,9 @@ async def view_ocorrencia(
             "current_user": current_user,
             "page_title": f"Ocorrência #{ocorrencia_id}",
             "ocorrencia": ocorrencia,
-            "situacao_labels": SITUACAO_LABELS,
             "sucesso": request.query_params.get("sucesso", ""),
             "erro": request.query_params.get("erro", ""),
+            **_ENUM_CONTEXT,
         },
     )
 
@@ -170,6 +347,15 @@ async def edit_ocorrencia_page(
     if ocorrencia["status"] == "FINALIZADO":
         return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?erro=Ocorrência+finalizada", status_code=302)
 
+    if ocorrencia["status"] != "EM_TRATAMENTO":
+        return RedirectResponse(
+            url=f"/ocorrencias/{ocorrencia_id}?erro=Edição+disponível+apenas+em+EM_TRATAMENTO",
+            status_code=302,
+        )
+
+    from app.services.user_service import user_service
+    usuarios = user_service.get_all_users(db)
+
     return templates.TemplateResponse(
         request,
         "pages/ocorrencias/edit.html",
@@ -177,9 +363,9 @@ async def edit_ocorrencia_page(
             "current_user": current_user,
             "page_title": f"Editar Ocorrência #{ocorrencia_id}",
             "ocorrencia": ocorrencia,
-            "situacoes": SituacaoOcorrenciaEnum,
-            "situacao_labels": SITUACAO_LABELS,
+            "usuarios": usuarios,
             "erro": request.query_params.get("erro", ""),
+            **_ENUM_CONTEXT,
         },
     )
 
@@ -189,23 +375,178 @@ async def update_ocorrencia(
     ocorrencia_id: int,
     current_user: Usuario = Depends(get_current_web_user),
     db: Session = Depends(get_write_db),
-    situacao: Optional[str] = Form(None),
+    tipo_ocorrencia: Optional[str] = Form(None),
     motivo: Optional[str] = Form(None),
-    observacoes: Optional[str] = Form(None),
-    encaminhamento: Optional[str] = Form(None),
+    causa_raiz: Optional[str] = Form(None),
+    responsavel_tipo: Optional[str] = Form(None),
+    responsavel_descricao: Optional[str] = Form(None),
+    setor_destino: Optional[str] = Form(None),
+    descricao: Optional[str] = Form(None),
+    atribuido_a_id: Optional[int] = Form(None),
+    detalhes_especificos: Optional[str] = Form(None),
 ):
+    import json as _json
     try:
+        detalhes = None
+        if detalhes_especificos:
+            try:
+                detalhes = _json.loads(detalhes_especificos)
+            except Exception:
+                detalhes = None
+
         data = OcorrenciaUpdate(
-            situacao=SituacaoOcorrenciaEnum(situacao) if situacao else None,
-            motivo=motivo or None,
-            observacoes=observacoes or None,
-            encaminhamento=encaminhamento or None,
+            tipo_ocorrencia=TipoOcorrenciaEnum(tipo_ocorrencia) if tipo_ocorrencia else None,
+            motivo=MotivoEnum(motivo) if motivo else None,
+            causa_raiz=CausaRaizEnum(causa_raiz) if causa_raiz else None,
+            responsavel_tipo=ResponsavelTipoEnum(responsavel_tipo) if responsavel_tipo else None,
+            responsavel_descricao=responsavel_descricao or None,
+            setor_destino=SetorDestinoEnum(setor_destino) if setor_destino else None,
+            descricao=descricao or None,
+            detalhes_especificos=detalhes,
+            atribuido_a_id=atribuido_a_id or None,
         )
         ocorrencia_service.update(db, ocorrencia_id, data, current_user)
-        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?sucesso=Ocorrência+atualizada", status_code=302)
+        return RedirectResponse(
+            url=f"/ocorrencias/{ocorrencia_id}?sucesso=Ocorrência+atualizada",
+            status_code=302,
+        )
     except Exception as e:
-        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}/editar?erro={str(e)}", status_code=302)
+        erro = e.detail if isinstance(e, HTTPException) else "Erro interno. Tente novamente."
+        return RedirectResponse(
+            url=f"/ocorrencias/{ocorrencia_id}/editar?erro={erro}",
+            status_code=302,
+        )
 
+
+# ---------- Transições de status via web ----------
+
+@router.post("/{ocorrencia_id}/pendente", include_in_schema=False)
+async def web_marcar_pendente(
+    ocorrencia_id: int,
+    current_user: Usuario = Depends(get_current_web_user),
+    db: Session = Depends(get_write_db),
+    motivo: str = Form(...),
+):
+    try:
+        ocorrencia_service.marcar_pendente(db, ocorrencia_id, MarcarPendenteRequest(motivo=motivo), current_user)
+        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?sucesso=Marcada+como+pendente", status_code=302)
+    except Exception as e:
+        erro = e.detail if isinstance(e, HTTPException) else "Erro interno. Tente novamente."
+        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?erro={erro}", status_code=302)
+
+
+@router.post("/{ocorrencia_id}/encaminhar", include_in_schema=False)
+async def web_encaminhar(
+    ocorrencia_id: int,
+    current_user: Usuario = Depends(get_current_web_user),
+    db: Session = Depends(get_write_db),
+    setor_destino: str = Form(...),
+    resolucao: str = Form(...),
+):
+    try:
+        ocorrencia_service.encaminhar(
+            db, ocorrencia_id,
+            EncaminharRequest(setor_destino=SetorDestinoEnum(setor_destino), resolucao=resolucao),
+            current_user,
+        )
+        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?sucesso=Ocorrência+encaminhada", status_code=302)
+    except Exception as e:
+        erro = e.detail if isinstance(e, HTTPException) else "Erro interno. Tente novamente."
+        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?erro={erro}", status_code=302)
+
+
+@router.post("/{ocorrencia_id}/concluir", include_in_schema=False)
+async def web_concluir(
+    ocorrencia_id: int,
+    current_user: Usuario = Depends(get_current_web_user),
+    db: Session = Depends(get_write_db),
+    comentario: Optional[str] = Form(None),
+):
+    try:
+        ocorrencia_service.concluir(db, ocorrencia_id, ConcluirRequest(comentario=comentario or None), current_user)
+        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?sucesso=Ocorrência+concluída", status_code=302)
+    except Exception as e:
+        erro = e.detail if isinstance(e, HTTPException) else "Erro interno. Tente novamente."
+        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?erro={erro}", status_code=302)
+
+
+@router.post("/{ocorrencia_id}/aprovar", include_in_schema=False)
+async def web_aprovar(
+    ocorrencia_id: int,
+    current_user: Usuario = Depends(get_current_web_user),
+    db: Session = Depends(get_write_db),
+    resolucao_final: str = Form(...),
+):
+    try:
+        ocorrencia_service.aprovar(db, ocorrencia_id, AprovarRequest(resolucao_final=resolucao_final), current_user)
+        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?sucesso=Ocorrência+finalizada", status_code=302)
+    except Exception as e:
+        erro = e.detail if isinstance(e, HTTPException) else "Erro interno. Tente novamente."
+        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?erro={erro}", status_code=302)
+
+
+@router.post("/{ocorrencia_id}/reprovar", include_in_schema=False)
+async def web_reprovar(
+    ocorrencia_id: int,
+    current_user: Usuario = Depends(get_current_web_user),
+    db: Session = Depends(get_write_db),
+    motivo_reprovacao: str = Form(...),
+):
+    try:
+        ocorrencia_service.reprovar(
+            db, ocorrencia_id,
+            ReprovarRequest(motivo_reprovacao=motivo_reprovacao),
+            current_user,
+        )
+        return RedirectResponse(
+            url=f"/ocorrencias/{ocorrencia_id}?sucesso=Ocorrência+reprovada+e+reaberta",
+            status_code=302,
+        )
+    except Exception as e:
+        erro = e.detail if isinstance(e, HTTPException) else "Erro interno. Tente novamente."
+        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?erro={erro}", status_code=302)
+
+
+@router.post("/{ocorrencia_id}/voltar", include_in_schema=False)
+async def web_voltar(
+    ocorrencia_id: int,
+    current_user: Usuario = Depends(get_current_web_user),
+    db: Session = Depends(get_write_db),
+):
+    try:
+        ocorrencia_service.voltar_para_tratamento(db, ocorrencia_id, current_user)
+        return RedirectResponse(
+            url=f"/ocorrencias/{ocorrencia_id}?sucesso=Voltou+para+tratamento",
+            status_code=302,
+        )
+    except Exception as e:
+        erro = e.detail if isinstance(e, HTTPException) else "Erro interno. Tente novamente."
+        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?erro={erro}", status_code=302)
+
+
+@router.post("/{ocorrencia_id}/comentar", include_in_schema=False)
+async def web_comentar(
+    ocorrencia_id: int,
+    current_user: Usuario = Depends(get_current_web_user),
+    db: Session = Depends(get_write_db),
+    comentario: str = Form(...),
+):
+    try:
+        ocorrencia_service.adicionar_comentario(
+            db, ocorrencia_id,
+            AdicionarComentarioRequest(comentario=comentario),
+            current_user,
+        )
+        return RedirectResponse(
+            url=f"/ocorrencias/{ocorrencia_id}?sucesso=Comentário+adicionado",
+            status_code=302,
+        )
+    except Exception as e:
+        erro = e.detail if isinstance(e, HTTPException) else "Erro interno. Tente novamente."
+        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?erro={erro}", status_code=302)
+
+
+# ---------- Anexos ----------
 
 @router.post("/{ocorrencia_id}/anexos", include_in_schema=False)
 async def upload_anexo(
@@ -217,9 +558,25 @@ async def upload_anexo(
     try:
         ocorrencia_service.get(db, ocorrencia_id, current_user)
         await anexo_service.save(db, ocorrencia_id, file, current_user)
+        from app.services.evento_service import evento_service
+        evento_service.registrar_evento(db, ocorrencia_id, "ANEXO_ADICIONADO", None, None, file.filename, current_user.id)
+        db.commit()
         return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?sucesso=Anexo+adicionado", status_code=302)
     except Exception as e:
-        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?erro={str(e)}", status_code=302)
+        erro = e.detail if isinstance(e, HTTPException) else "Erro interno. Tente novamente."
+        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?erro={erro}", status_code=302)
+
+
+@router.get("/{ocorrencia_id}/anexos/{anexo_id}/download", include_in_schema=False)
+async def download_anexo_web(
+    ocorrencia_id: int,
+    anexo_id: int,
+    current_user: Usuario = Depends(get_current_web_user),
+    db: Session = Depends(get_write_db),
+):
+    from fastapi.responses import FileResponse
+    caminho, nome = anexo_service.get_file_path(db, anexo_id, current_user)
+    return FileResponse(path=caminho, filename=nome, media_type="application/octet-stream")
 
 
 @router.post("/{ocorrencia_id}/anexos/{anexo_id}/deletar", include_in_schema=False)
@@ -233,4 +590,5 @@ async def delete_anexo(
         anexo_service.delete(db, anexo_id, current_user)
         return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?sucesso=Anexo+removido", status_code=302)
     except Exception as e:
-        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?erro={str(e)}", status_code=302)
+        erro = e.detail if isinstance(e, HTTPException) else "Erro interno. Tente novamente."
+        return RedirectResponse(url=f"/ocorrencias/{ocorrencia_id}?erro={erro}", status_code=302)
