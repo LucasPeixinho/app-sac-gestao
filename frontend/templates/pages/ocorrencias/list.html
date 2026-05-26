@@ -131,18 +131,6 @@
                     </select>
                 </div>
 
-                <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Setor Destino</label>
-                    <select name="setor_destino"
-                            class="w-full rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none">
-                        <option value="">Todos</option>
-                        {% for s in setores %}
-                        <option value="{{ s.value }}" {% if setor_filter == s.value %}selected{% endif %}>
-                            {{ setor_labels.get(s.value, s.value) }}
-                        </option>
-                        {% endfor %}
-                    </select>
-                </div>
 
                 <div>
                     <label class="block text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1.5">Data Início</label>

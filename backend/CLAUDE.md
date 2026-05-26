@@ -2,136 +2,168 @@
 
 ## Stack
 
-- **Backend**: FastAPI + SQLAlchemy 2.x + Oracle (oracledb)
+- **Backend**: FastAPI + SQLAlchemy 2.x + Oracle (oracledb thick mode)
 - **Frontend**: Jinja2 + Tailwind (CDN Play) + HTMX 2.0 + Alpine.js 3.x (defer)
 - **Auth**: JWT via python-jose + passlib bcrypt; sessão web via cookie `gsac_session`
-- **Banco leitura**: `read_engine` → schema CEDEP (Oracle)
+- **Banco leitura**: `read_engine` → schema CEDEP (Oracle) — somente leitura de notas fiscais
 - **Banco escrita**: `write_engine` → schema `gestao_sac` (Oracle)
 
-## Estrutura de diretórios relevante
+## Estrutura de diretórios
 
 ```
-app/
-  main.py                        # monta routers REST (/api/v1/) e web (raiz)
-  core/
-    database.py                  # read_engine + write_engine + get_write_db
-  models/
-    ocorrencia.py                # Ocorrencia
-    ocorrencia_item.py           # OcorrenciaItem
-    ocorrencia_evento.py         # OcorrenciaEvento
-    usuario.py                   # Usuario
-    anexo.py                     # Anexo
-  schemas/
-    ocorrencia.py                # Pydantic schemas + validação IMPACTOS_POR_TIPO
-  services/
-    ocorrencia_service.py        # CRUD + máquina de estados
-    evento_service.py            # audit log de eventos
-    carregamento_service.py      # consulta nota fiscal no CEDEP (read_engine)
-    user_service.py
-    anexo_service.py
-  api/v1/
-    ocorrencias.py               # endpoints REST
-  web/
-    routes/
-      ocorrencias.py             # rotas web (HTML)
-      usuarios.py
-    dependencies.py              # get_current_web_user
-    templates_config.py          # instância Jinja2Templates com now() global
-  utils/
-    enums.py                     # TipoOcorrenciaEnum, CausaRaizEnum, StatusOcorrenciaEnum, etc.
-  templates/
-    base/
-      base.html                  # carrega HTMX 2.0, Alpine 3.x (defer), Tailwind CDN, Lucide
-      authenticated.html         # layout com sidebar + header
-    pages/
-      ocorrencias/
-        create.html              # página nova ocorrência
-        list.html                # listagem com KPIs e filtros
-        view.html                # visualização + timeline de eventos
-        edit.html                # edição
-    partials/
-      nota_info.html             # resultado HTMX ao buscar NF
-      impacto_options.html
-sql/
-  07_refactor_ocorrencias_fluxo.sql  # migration — EXECUTAR COMO gestao_sac
+app-sac-gestao/
+  backend/                          ← raiz do servidor FastAPI (uvicorn)
+    app/
+      main.py                       # monta routers REST (/api/v1/) e web (raiz)
+      core/
+        database.py                 # read_engine + write_engine + get_write_db
+        security.py                 # JWT encode/decode
+        config.py                   # Settings (lê .env)
+        permissions.py
+      models/
+        ocorrencia.py               # Ocorrencia (tabela principal)
+        ocorrencia_item.py          # OcorrenciaItem
+        ocorrencia_evento.py        # OcorrenciaEvento (audit log)
+        usuario.py                  # Usuario
+        anexo.py                    # Anexo
+      schemas/
+        ocorrencia.py               # Pydantic schemas + requests de transição
+        usuario.py
+        auth.py
+        carregamento.py
+      services/
+        ocorrencia_service.py       # CRUD + máquina de estados
+        evento_service.py           # registra eventos no audit log
+        carregamento_service.py     # consulta NF no CEDEP (read_engine)
+        user_service.py
+        anexo_service.py
+      api/v1/
+        ocorrencias.py              # endpoints REST
+        auth.py
+        users.py
+        carregamentos.py
+      web/
+        routes/
+          ocorrencias.py            # rotas web HTML (GET/POST)
+          usuarios.py               # rotas web HTML (GET/POST)
+          dashboard.py
+          auth.py
+        dependencies.py             # get_current_web_user
+        templates_config.py         # Jinja2Templates apontando para ../frontend/templates
+        session.py
+      utils/
+        enums.py                    # todos os enums e dicts de labels PT-BR
+    sql/                            # migrations numeradas — executar como gestao_sac
+      01_create_user.sql
+      02_create_tables.sql
+      03_ocorrencias_anexos.sql
+      04_migration_ocorrencias.sql
+      05_fix_anexos.sql
+      06_rename_situacoes.sql
+      07_refactor_ocorrencias_fluxo.sql
+      08_rename_columns_tipo_motivo.sql
+      09_fix_check_constraint_tipo.sql
+
+  frontend/                         ← templates e assets (separado do backend)
+    templates/
+      base/
+        base.html                   # carrega HTMX 2.0, Alpine 3.x (defer), Tailwind CDN, Lucide
+        authenticated.html          # layout sidebar + header com {% block header_actions %}
+      pages/
+        auth/login.html
+        dashboard/home.html
+        ocorrencias/
+          list.html                 # listagem com KPIs e filtros avançados
+          create.html               # criação (busca NF via HTMX + seleção de itens Alpine)
+          view.html                 # visualização + timeline + modais de transição
+          edit.html                 # edição (apenas EM_TRATAMENTO)
+        usuarios/
+          list.html
+          create.html
+          edit.html
+      partials/
+        badge_status.html           # badge colorido por status
+        timeline_evento.html        # linha do tempo de eventos
+        nota_info.html              # resultado HTMX ao buscar NF
+        impacto_options.html
+        toast_message.html
+    static/                         ← CSS e JS customizados (se houver)
 ```
 
-## Fluxo de status das ocorrências
+## Modelos de banco (schema gestao_sac)
+
+### Ocorrencia
+Colunas principais: `id`, `numero_nota_fiscal`, `id_carregamento`, snapshot NF (cliente, motorista, vendedor, transportadora, valor_total, data_faturamento, data_saida_carregamento), `motivo` (DB: `tipo_ocorrencia`), `tipo_ocorrencia` (DB: `impacto`), `causa_raiz`, `responsavel_tipo`, `responsavel_descricao`, `setor_destino`, `descricao`, `motivo_pendencia`, `resolucao_encaminhamento`, `resolucao_final`, `detalhes_especificos` (CLOB/JSON), `status`, `criado_por_id`, `atribuido_a_id`, `aprovado_por_id`, `aprovado_em`, `created_at`, `updated_at`.
+
+> **Atenção mapeamento Python ↔ DB:**
+> - Python `motivo` → coluna DB `tipo_ocorrencia`
+> - Python `tipo_ocorrencia` → coluna DB `impacto`
+> (Mapeamento via `Column('nome_db', ...)` no SQLAlchemy — não há migration pendente para isso)
+
+## Enums (`app/utils/enums.py`)
+
+| Enum | Valores |
+|------|---------|
+| `StatusOcorrenciaEnum` | EM_TRATAMENTO, PENDENTE, ENCAMINHADO, CONCLUIDO, FINALIZADO |
+| `MotivoEnum` | AVARIA, INVERSAO_MERCADORIA, FALTA_MERCADORIA, SOBRA_MERCADORIA, DEVOLUCAO_SOLICITADA, PEDIDO_TROCA, EXTRAVIO, ATRASO_ENTREGA, PEDIDO_DUPLICADO, PEDIDO_DESACORDO, OUTRO |
+| `TipoOcorrenciaEnum` | DEVOLUCAO_TOTAL, DEVOLUCAO_PARCIAL, REENVIO, REPOSICAO |
+| `CausaRaizEnum` | ERRO_EXPEDICAO, ERRO_VENDEDOR, ERRO_TRANSPORTADORA, ERRO_MOTORISTA, DEFEITO_FABRICA, DESISTENCIA_CLIENTE, ERRO_CLIENTE, FORA_ROTA, OUTRO |
+| `ResponsavelTipoEnum` | CEDEP, VENDEDOR, TRANSPORTADORA, MOTORISTA, CLIENTE, FABRICANTE, NAO_APLICAVEL |
+| `ItemRoleEnum` | AFETADO, ENVIADO_INCORRETAMENTE, ITEM_CORRETO |
+| `RoleEnum` | OPERADOR, GERENTE |
+
+Labels PT-BR: `STATUS_LABELS`, `TIPO_LABELS`, `MOTIVO_LABELS`, `CAUSA_LABELS`, `RESPONSAVEL_LABELS`, `SETOR_LABELS`.
+
+> `STATUS_LABELS["CONCLUIDO"]` = `"Aguardando aprovação"` (não "Concluído")
+
+## Fluxo de status
 
 ```
-EM_TRATAMENTO → PENDENTE | ENCAMINHADO | CONCLUIDO
-PENDENTE      → EM_TRATAMENTO | ENCAMINHADO | CONCLUIDO
-ENCAMINHADO   → EM_TRATAMENTO | PENDENTE | CONCLUIDO
+EM_TRATAMENTO → PENDENTE (marcar pendente) | ENCAMINHADO | CONCLUIDO (enviar p/ aprovação)
+PENDENTE      → EM_TRATAMENTO (reabrir)   | ENCAMINHADO | CONCLUIDO
+ENCAMINHADO   → EM_TRATAMENTO (reabrir)   | PENDENTE    | CONCLUIDO
 CONCLUIDO     → FINALIZADO (gerente aprovar) | EM_TRATAMENTO (gerente reprovar)
-FINALIZADO    → terminal
+FINALIZADO    → terminal (sem transições)
 ```
 
-## Página /ocorrencias/nova (create.html)
-
-### Mecanismo atual
-
-1. Usuário digita NF e clica Buscar
-2. HTMX faz `GET /ocorrencias/buscar-nota` e injeta `partials/nota_info.html` em `#nota-info`
-3. `nota_info.html` renderiza:
-   - `<script id="nota-produtos-json" type="application/json">` com array de produtos
-   - Caixa verde com dados da nota
-4. `hx-on:htmx:after-swap="onNotaSwap(event)"` no `<form>` captura o evento HTMX
-5. `onNotaSwap` (definido em `{% block scripts_extra %}`) lê `#nota-produtos-json` e atualiza o estado Alpine via `Alpine.$data(root)`
-
-### Estado Alpine (x-data em `#ocorrencia-form-root`)
-
-```js
-{
-  produtos: [],          // array de produtos da NF
-  selecionados: [],      // array de codprod selecionados (controla visibilidade)
-  itens_selecionados: {}, // mapa codprod → dados do item (para envio)
-  motivo: '',
-  causa: '',
-  notaOk: false,
-  arquivosNomes: [],
-  // métodos: isSelecionado, toggleItem, updateQtd, selecionarTodos, desselecionarTodos, ...
-}
-```
-
-### Problema em aberto — seleção de produtos NÃO funciona
-
-Após buscar nota e produtos aparecerem via `x-for`:
-- Botão "Selecionar todos" não aparece
-- Campo de qtd afetada não aparece ao marcar checkbox
-
-**Hipóteses já descartadas:**
-- Timing de Alpine MutationObserver (resolvido com hx-on no form)
-- `Object.keys()` não rastreado pelo proxy Alpine (trocado por `.every()`)
-- `x-if` vs `x-show` no input de quantidade (já usa `x-show`)
-- `itens_selecionados[codprod]` com proxy stale (trocado por `selecionados[]` array)
-
-**Estado atual do código:**
-- `selecionados: []` é um array reativo usado para controle de visibilidade
-- `isSelecionado(codprod)` usa `selecionados.includes(codprod)`
-- `todosSelecionados` usa `selecionados.length === produtos.length`
-- `x-show="isSelecionado(p.codprod)"` controla visibilidade do input de qtd
-- Produtos carregam corretamente (x-for funciona), mas interações não reagem
-
-**Próxima abordagem a tentar:** a definir
-
-## Rotas principais
+## Rotas web principais
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| GET | `/ocorrencias` | listagem |
+| GET | `/ocorrencias` | listagem com KPIs e filtros |
 | GET | `/ocorrencias/nova` | formulário de criação |
 | POST | `/ocorrencias` | salva nova ocorrência |
 | GET | `/ocorrencias/buscar-nota` | HTMX partial — busca NF no CEDEP |
-| GET | `/ocorrencias/{id}` | visualização |
+| GET | `/ocorrencias/{id}` | visualização + timeline |
 | GET | `/ocorrencias/{id}/editar` | edição |
 | POST | `/ocorrencias/{id}/atualizar` | salva edição |
-| POST | `/ocorrencias/{id}/pendente` | transição status |
-| POST | `/ocorrencias/{id}/encaminhar` | transição status |
-| POST | `/ocorrencias/{id}/concluir` | transição status |
-| POST | `/ocorrencias/{id}/aprovar` | transição status (gerente) |
-| POST | `/ocorrencias/{id}/reprovar` | transição status (gerente) |
+| POST | `/ocorrencias/{id}/pendente` | transição: marcar pendente |
+| POST | `/ocorrencias/{id}/encaminhar` | transição: encaminhar |
+| POST | `/ocorrencias/{id}/concluir` | transição: enviar p/ aprovação |
+| POST | `/ocorrencias/{id}/aprovar` | transição: aprovar e finalizar (GERENTE) |
+| POST | `/ocorrencias/{id}/reprovar` | transição: reprovar (GERENTE) |
+| GET/POST | `/usuarios` | listagem e criação |
+| GET/POST | `/usuarios/{id}/editar` | edição de usuário |
 
-## Pendências
+## Layout (authenticated.html)
 
-- **EXECUTAR** `sql/07_refactor_ocorrencias_fluxo.sql` como usuário `gestao_sac` antes de testar
-- **Resolver** problema de interatividade na seleção de produtos em `/ocorrencias/nova`
+O header fixo (`h-16`) tem `{% block header_actions %}{% endblock %}` entre o título da página e o avatar/logout. **Todas as páginas** usam esse bloco para injetar botões ou links de volta — nenhuma página tem sub-header próprio dentro de `page_content`.
+
+- `list.html` → "Nova Ocorrência" no header_actions
+- `create.html` / `edit.html` / `view.html` → link "Voltar" no header_actions
+- `view.html` também coloca o badge de status no header_actions; os botões de transição ficam no `page_content` (precisam do escopo Alpine `x-data`)
+
+## Página /ocorrencias/nova (create.html)
+
+1. Usuário digita NF e clica Buscar
+2. HTMX faz `GET /ocorrencias/buscar-nota` e injeta `partials/nota_info.html` em `#nota-info`
+3. `nota_info.html` renderiza um `<script id="nota-produtos-json" type="application/json">` com array de produtos + caixa verde com dados da nota
+4. `hx-on:htmx:after-swap="onNotaSwap(event)"` no `<form>` lê o JSON e injeta no estado Alpine via `Alpine.$data(root)`
+5. Usuário seleciona itens; o mapa `selecionadosMap` é serializado em `itens_json` (hidden input) em três pontos: `:value` reativo, `@submit`, e `enviarAprovacao()` antes do `.submit()`
+6. Backend recebe `itens_json: str = Form("[]")` e faz parse
+
+## Convenções obrigatórias
+
+- **Sempre criar migration SQL** em `backend/sql/` (arquivo numerado sequencialmente) junto com qualquer alteração que afete o banco: constraints, colunas, tabelas, valores de CHECK, índices, etc.
+- Migrations são executadas **manualmente** como usuário `gestao_sac` no Oracle (`192.168.0.98/WINT`)
+- Alterações puramente de Python ou templates não precisam de migration
